@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Abertura de Sinistro</title>
+  <link rel="manifest" href="manifest.json">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background-color: #0f172a; color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between p-4">
+
+  <!-- Cabeçalho -->
+  <header class="text-center py-4">
+    <div class="inline-flex items-center justify-center w-12 h-12 bg-blue-600 rounded-2xl mb-2 shadow-lg shadow-blue-500/30">
+      🚗
+    </div>
+    <h1 class="text-xl font-bold text-white">Portal do Segurado</h1>
+    <p class="text-xs text-slate-400">Informe os dados e fotos do ocorrido</p>
+  </header>
+
+  <!-- Formulário Mobile -->
+  <main class="w-full max-w-md mx-auto bg-slate-800/80 backdrop-blur border border-slate-700/50 p-6 rounded-3xl shadow-xl">
+    <form id="formMobileSinistro" class="space-y-4">
+      
+      <div>
+        <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">Placa do Veículo</label>
+        <input type="text" id="placa" placeholder="EX: ABC-1234" required class="w-full bg-slate-900/90 border border-slate-700 rounded-xl px-4 py-3 text-white uppercase tracking-widest placeholder-slate-500 focus:outline-none focus:border-blue-500">
+      </div>
+
+      <div>
+        <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">Modelo do Veículo</label>
+        <input type="text" id="modelo" placeholder="Ex: VW Gol 1.6 1992" required class="w-full bg-slate-900/90 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500">
+      </div>
+
+      <div>
+        <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">Descrição do Ocorrido</label>
+        <textarea id="descricao" rows="3" placeholder="Descreva brevemente o que aconteceu..." required class="w-full bg-slate-900/90 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"></textarea>
+      </div>
+
+      <!-- Upload com Acesso à Câmera Nativa -->
+      <div>
+        <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1">Foto da Vistoria / Dano</label>
+        <div class="relative border-2 border-dashed border-slate-700 rounded-2xl p-4 text-center bg-slate-900/40 hover:border-blue-500 transition">
+          <input type="file" id="foto" accept="image/*" capture="environment" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onchange="previewImage(event)">
+          <div id="previewContainer">
+            <span class="text-2xl mb-1 block">📸</span>
+            <p class="text-xs text-slate-300 font-medium">Toque para tirar foto ou anexar</p>
+            <p class="text-[10px] text-slate-500 mt-1">Abre a câmera do celular automaticamente</p>
+          </div>
+        </div>
+      </div>
+
+      <button type="submit" id="btnEnviar" class="w-full bg-blue-600 hover:bg-blue-500 active:scale-95 text-white font-bold py-4 rounded-2xl shadow-lg shadow-blue-600/30 transition duration-150">
+        Enviar Registro de Sinistro
+      </button>
+    </form>
+
+    <div id="statusMessage" class="hidden mt-4 p-4 rounded-xl text-center text-sm font-semibold"></div>
+  </main>
+
+  <!-- Rodapé -->
+  <footer class="text-center py-4 text-[11px] text-slate-500">
+    Atendimento Instantâneo • Seguradora Workflow OS
+  </footer>
+
+  <script>
+    const API_URL = "http://127.0.0.1:8000";
+
+    function previewImage(event) {
+      const file = event.target.files[0];
+      if (file) {
+        const container = document.getElementById('previewContainer');
+        container.innerHTML = `
+          <p class="text-xs text-emerald-400 font-bold">✓ Foto Selecionada:</p>
+          <p class="text-[11px] text-slate-300 truncate mt-1">${file.name}</p>
+        `;
+      }
+    }
+
+    document.getElementById('formMobileSinistro').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('btnEnviar');
+      const statusMsg = document.getElementById('statusMessage');
+      
+      btn.disabled = true;
+      btn.innerText = "Enviando dados e fotos...";
+
+      const formData = new FormData();
+      formData.append('placa_veiculo', document.getElementById('placa').value);
+      formData.append('modelo_veiculo', document.getElementById('modelo').value);
+      formData.append('descricao_dano', document.getElementById('descricao').value);
+      formData.append('cliente_id', 1); // ID padrão do cliente ou extraído da URL/Token
+
+      const fotoFile = document.getElementById('foto').files[0];
+      if (fotoFile) {
+        formData.append('file', fotoFile);
+      }
+
+      try {
+        // Envia direto para a API FastAPI
+        const response = await fetch(`${API_URL}/cliente/sinistros/`, {
+            method: 'POST',
+            body: formData
+          // Nota: Ao usar FormData com upload, o navegador define o Content-Type automaticamente
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          statusMsg.className = "mt-4 p-4 rounded-xl text-center text-sm font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30";
+          statusMsg.innerHTML = `✅ Sinistro Registrado!<br><span class="text-xs font-normal text-slate-300">Protocolo: <strong>${data.protocolo}</strong></span>`;
+          statusMsg.classList.remove('hidden');
+          document.getElementById('formMobileSinistro').reset();
+          document.getElementById('previewContainer').innerHTML = `
+            <span class="text-2xl mb-1 block">📸</span>
+            <p class="text-xs text-slate-300 font-medium">Toque para tirar foto ou anexar</p>
+          `;
+        } else {
+          const err = await response.json();
+          throw new Error(err.detail || 'Erro ao registrar sinistro.');
+        }
+      } catch (error) {
+        statusMsg.className = "mt-4 p-4 rounded-xl text-center text-sm font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/30";
+        statusMsg.innerText = `❌ Erro: ${error.message}`;
+        statusMsg.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+        btn.innerText = "Enviar Registro de Sinistro";
+      }
+    });
+  </script>
+</body>
+</html>

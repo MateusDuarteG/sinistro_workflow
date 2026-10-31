@@ -1,0 +1,145 @@
+import streamlit as st
+import requests
+
+API_URL = "http://127.0.0.1:8000"
+
+st.set_page_config(page_title="Gestão de Sinistros - Seguradora", page_icon="🚗", layout="wide")
+
+st.title("🚗 Sistema de Gestão de Sinistros (Workflow OS)")
+st.sidebar.title("🔐 Autenticação & Sessão")
+
+# Estado da sessão para guardar o token JWT
+if "token" not in st.session_state:
+    st.session_state["token"] = None
+if "perfil" not in st.session_state:
+    st.session_state["perfil"] = None
+
+# --- SIDEBAR: LOGIN ---
+if not st.session_state["token"]:
+    st.sidebar.subheader("Faça Login na sua Conta")
+    email = st.sidebar.text_input("E-mail")
+    senha = st.sidebar.text_input("Senha", type="password")
+    
+    if st.sidebar.button("Entrar"):
+        try:
+            response = requests.post(f"{API_URL}/login", data={"username": email, "password": senha})
+            if response.status_code == 200:
+                data = response.json()
+                st.session_state["token"] = data["access_token"]
+                
+                # Busca o perfil do utilizador logado
+                headers = {"Authorization": f"Bearer {st.session_state['token']}"}
+                perfil_res = requests.get(f"{API_URL}/perfil/me", headers=headers)
+                if perfil_res.status_code == 200:
+                    st.session_state["perfil"] = perfil_res.json()["perfil"]
+                    st.session_state["user_id"] = perfil_res.json()["id"]
+                    st.session_state["nome"] = perfil_res.json()["nome"]
+                
+                st.sidebar.success("Login efetuado com sucesso!")
+                st.rerun()
+            else:
+                st.sidebar.error("E-mail ou senha incorretos.")
+        except Exception as e:
+            st.sidebar.error(f"Erro de conexão com a API: {e}")
+else:
+    st.sidebar.info(f"Logado como: **{st.session_state['nome']}**")
+    st.sidebar.markdown(f"**Perfil:** `{st.session_state['perfil'].upper()}`")
+    
+    if st.sidebar.button("Terminar Sessão"):
+        st.session_state["token"] = None
+        st.session_state["perfil"] = None
+        st.rerun()
+
+# --- CORPO DA APLICAÇÃO ---
+if st.session_state["token"]:
+    headers = {"Authorization": f"Bearer {st.session_state['token']}"}
+    
+    tab1, tab2, tab3 = st.tabs(["📋 Lista de Sinistros", "➕ Abrir Novo Sinistro", "⚙️ Gestão de Status & Perícia"])
+    
+    with tab1:
+        st.header("Ordens de Serviço de Sinistros Ativas")
+        if st.button("Atualizar Lista"):
+            st.rerun()
+            
+        res = requests.get(f"{API_URL}/sinistros/", headers=headers)
+        if res.status_code == 200:
+            sinistros = res.json()
+            if not sinistros:
+                st.info("Nenhum sinistro encontrado para o seu perfil.")
+            for s in sinistros:
+                with st.expander(f"Protocolo: {s['protocolo']} | Veículo: {s['modelo_veiculo']} ({s['placa_veiculo']}) | Status: {s['status']}"):
+                    st.write(f"**Descrição do Dano:** {s['descricao_dano']}")
+                    st.write(f"**Valor Estimado:** R$ {s.get('valor_estimado', 'Não definido')}")
+                    st.write(f"**Laudo do Perito:** {s.get('laudo_perito', 'Pendente')}")
+                    
+                    # Botão para ver histórico
+                    if st.button(f"Ver Histórico #{s['id']}", key=f"hist_{s['id']}"):
+                        hist_res = requests.get(f"{API_URL}/sinistros/{s['id']}/historico", headers=headers)
+                        if hist_res.status_code == 200:
+                            st.write("### Histórico de Auditoria:")
+                            for h in hist_res.json():
+                                st.markdown(f"- De `{{h['status_anterior']}}` ➔ Para `{{h['status_novo']}}` | Obs: *{h.get('observacao', 'Sem obs')}*")
+        else:
+            st.error("Erro ao carregar sinistros.")
+
+    with tab2:
+        st.header("Abertura de Novo Sinistro")
+        if st.session_state["perfil"] in ["atendente", "cliente"]:
+            with st.form("form_sinistro"):
+                placa = st.text_input("Placa do Veículo (ex: ABC-1234)")
+                modelo = st.text_input("Modelo do Veículo (ex: VW Gol 1992)")
+                descricao = st.text_area("Descrição detalhada do dano")
+                submit = st.form_submit_button("Criar Sinistro")
+                
+                if submit:
+                    payload = {
+                        "placa_veiculo": placa,
+                        "modelo_veiculo": modelo,
+                        "descricao_dano": descricao,
+                        "cliente_id": st.session_state["user_id"]
+                    }
+                    create_res = requests.post(f"{API_URL}/sinistros/", json=payload, headers=headers)
+                    if create_res.status_code == 201:
+                        st.success("Sinistro aberto com sucesso!")
+                    else:
+                        st.error(f"Erro ao abrir sinistro: {create_res.json().get('detail')}")
+        else:
+            st.warning("O seu perfil não tem permissão para abrir novos sinistros.")
+
+    with tab3:
+        st.header("Avançar Estado do Sinistro (Workflow)")
+        st.markdown("Altere o estado da Ordem de Serviço conforme as regras da Máquina de Estados.")
+        
+        res = requests.get(f"{API_URL}/sinistros/", headers=headers)
+        if res.status_code == 200:
+            sinistros = res.json()
+            if sinistros:
+                sinistro_opcoes = {f"{s['protocolo']} - {s['modelo_veiculo']} (Atual: {s['status']})": s['id'] for s in sinistros}
+                escolha = st.selectbox("Selecione o Sinistro", list(sinistro_opcoes.keys()))
+                
+                if escolha:
+                    selected_id = sinistro_opcoes[escolha]
+                    novo_status = st.selectbox("Novo Status", [
+                        "EM_PERICIA", "RECUPERAVEL", "PERDA_TOTAL", 
+                        "AGUARDANDO_PAGAMENTO", "CONCLUIDO", "CANCELADO"
+                    ])
+                    valor_est = st.number_input("Valor Estimado (R$)", value=0.0)
+                    laudo = st.text_area("Laudo Técnico / Observação da Mudança")
+                    
+                    if st.button("Executar Transição de Estado"):
+                        patch_payload = {
+                            "novo_status": novo_status,
+                            "observacao": laudo,
+                            "valor_estimado": valor_est if valor_est > 0 else None,
+                            "laudo_perito": laudo if laudo else None
+                        }
+                        patch_res = requests.patch(f"{API_URL}/sinistros/{selected_id}/status", json=patch_payload, headers=headers)
+                        if patch_res.status_code == 200:
+                            st.success("Estado alterado com sucesso!")
+                            st.rerun()
+                        else:
+                            st.error(f"Erro na Máquina de Estados: {patch_res.json().get('detail')}")
+            else:
+                st.info("Nenhum sinistro disponível para alteração.")
+else:
+    st.warning("⚠️ Por favor, faça login na barra lateral para aceder ao sistema.")
